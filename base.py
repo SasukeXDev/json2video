@@ -50,7 +50,7 @@ def video():
 
 # 🔥 Play Details
 @app.route('/play')
-def play():
+def m3u8():
     link = request.args.get('link')
     if not link:
         return jsonify({"error": "Missing link"}), 400
