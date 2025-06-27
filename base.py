@@ -8,8 +8,15 @@ from urllib.parse import urlparse, urljoin
 
 app = Flask(__name__)
 
-# 👇 Set your API key here (or through env var)
-MY_SECRET_KEY = os.environ.get("API_KEY", " ")
+# ✅ Set your API key here or through environment variable
+MY_SECRET_KEY = os.environ.get("API_KEY", "your-super-secret-key")
+
+# ✅ Add your allowed domains here
+ALLOWED_DOMAINS = [
+    "yourwebsite.com",
+    "www.yourwebsite.com",
+    "sub.yourwebsite.com"
+]
 
 # 🧠 Headers for hanime.tv
 HEADERS = {
@@ -27,12 +34,22 @@ def proxy_hanime_api(url, is_json=True):
         return {"error": str(e)}, 500
 
 
-# ✅ API KEY PROTECTION
+# ✅ API KEY + DOMAIN PROTECTION
 @app.before_request
-def check_api_key():
+def check_api_key_and_domain():
     client_key = request.headers.get("X-API-Key")
     if client_key != MY_SECRET_KEY:
-        return jsonify({"error": "Unauthorized"}), 401
+        return jsonify({"error": "Unauthorized - Invalid API Key"}), 401
+
+    # Check Origin or Referer
+    origin = request.headers.get("Origin") or request.headers.get("Referer")
+    if origin:
+        parsed = urlparse(origin)
+        hostname = parsed.hostname
+        if hostname not in ALLOWED_DOMAINS:
+            return jsonify({"error": f"Unauthorized - Domain '{hostname}' not allowed"}), 403
+    else:
+        return jsonify({"error": "Unauthorized - No Origin or Referer"}), 403
 
 
 # 🔥 Trending
