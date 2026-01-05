@@ -6,103 +6,103 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HLS_OUTPUT_DIR = os.path.join(BASE_DIR, "static", "streams")
-os.makedirs(HLS_OUTPUT_DIR, exist_ok=True)
+HLS_DIR = os.path.join(BASE_DIR, "static", "streams")
+os.makedirs(HLS_DIR, exist_ok=True)
 
-@app.route('/convert', methods=['POST', 'OPTIONS'])
+FFMPEG_BIN = "ffmpeg"  # Render supports this if added in build command
+
+# ---------------------------
+# Convert Endpoint
+# ---------------------------
+@app.route("/convert", methods=["POST"])
 def convert():
-    if request.method == 'OPTIONS':
-        return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True)
+    if not data or "url" not in data:
+        return jsonify({"status": "error", "message": "URL missing"}), 400
 
-    data = request.get_json()
-    video_url = data.get('url')
-    if not video_url:
-        return jsonify({"status": "error", "message": "Missing URL"}), 400
-
+    video_url = data["url"]
     stream_id = hashlib.md5(video_url.encode()).hexdigest()
-    output_path = os.path.join(HLS_OUTPUT_DIR, stream_id)
-    playlist_file = os.path.join(output_path, 'index.m3u8')
+    out_dir = os.path.join(HLS_DIR, stream_id)
+    playlist = os.path.join(out_dir, "index.m3u8")
 
-    os.makedirs(output_path, exist_ok=True)
-    base_server_url = request.host_url.rstrip('/').replace('http://', 'https://')
+    os.makedirs(out_dir, exist_ok=True)
 
-    # ✅ If playlist already exists, reuse it
-    if os.path.exists(playlist_file):
+    # If already converted → reuse
+    if os.path.exists(playlist):
         return jsonify({
             "status": "success",
-            "hls_link": f"{base_server_url}/static/streams/{stream_id}/index.m3u8"
-        }), 200
+            "hls_link": f"{request.host_url}static/streams/{stream_id}/index.m3u8"
+        })
 
-    # ✅ FIXED FFMPEG COMMAND
+    # -------- SAFE FFMPEG COMMAND --------
     cmd = [
-        'ffmpeg', '-y',
-        '-hide_banner', '-loglevel', 'error',
+        FFMPEG_BIN, "-y",
+        "-hide_banner", "-loglevel", "warning",
 
-        # Network stability
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "5",
 
-        '-i', video_url,
+        "-i", video_url,
 
-        # Map everything safely
-        '-map', '0:v',
-        '-map', '0:a?',
-        '-map', '0:s?',
+        "-map", "0:v:0",
+        "-map", "0:a?",
 
-        # Video untouched
-        '-c:v', 'copy',
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-ac", "2",
 
-        # Audio compatible with HLS
-        '-c:a', 'aac',
-        '-ac', '2',
+        "-f", "hls",
+        "-hls_time", "6",
+        "-hls_list_size", "0",
+        "-hls_flags", "independent_segments",
 
-        # Subtitles → WebVTT (Video.js compatible)
-        '-c:s', 'webvtt',
+        "-hls_segment_filename",
+        os.path.join(out_dir, "seg_%05d.ts"),
 
-        # HLS FLAGS (VERY IMPORTANT)
-        '-f', 'hls',
-        '-hls_time', '6',
-        '-hls_list_size', '0',
-        '-hls_flags', 'independent_segments',
-        '-hls_playlist_type', 'event',
-
-        '-hls_segment_filename',
-        os.path.join(output_path, 'seg_%05d.ts'),
-
-        playlist_file
+        playlist
     ]
 
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-    # ✅ Proper wait: ensure BOTH playlist + first segment exist
-    timeout = 10
+    # -------- WAIT UNTIL READY --------
+    timeout = 12
     while timeout > 0:
-        if os.path.exists(playlist_file):
-            segs = [f for f in os.listdir(output_path) if f.endswith('.ts')]
-            if len(segs) >= 1:
+        if os.path.exists(playlist):
+            if any(f.endswith(".ts") for f in os.listdir(out_dir)):
                 break
         time.sleep(1)
         timeout -= 1
 
-    if os.path.exists(playlist_file):
-        return jsonify({
-            "status": "success",
-            "hls_link": f"{base_server_url}/static/streams/{stream_id}/index.m3u8"
-        }), 200
+    if not os.path.exists(playlist):
+        return jsonify({"status": "error", "message": "FFmpeg failed"}), 500
 
-    return jsonify({"status": "error", "message": "FFmpeg failed"}), 500
+    return jsonify({
+        "status": "success",
+        "hls_link": f"{request.host_url}static/streams/{stream_id}/index.m3u8"
+    })
 
 
-@app.route('/static/streams/<path:filename>')
-def custom_static(filename):
-    response = send_from_directory(HLS_OUTPUT_DIR, filename)
-    response.headers.add("Access-Control-Allow-Origin", "*")
+# ---------------------------
+# Static HLS Serving
+# ---------------------------
+@app.route("/static/streams/<path:filename>")
+def serve_hls(filename):
+    response = send_from_directory(HLS_DIR, filename)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Cache-Control"] = "no-cache"
     return response
 
-if __name__ == '__main__':
+
+# ---------------------------
+# Run
+# ---------------------------
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
