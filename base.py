@@ -83,10 +83,16 @@ def convert():
     if not os.path.exists(playlist):
         return jsonify({"status": "error", "message": "FFmpeg failed"}), 500
 
+    proto = request.headers.get("X-Forwarded-Proto", "https")
+    host = request.headers.get("Host")
+
+    hls_url = f"{proto}://{host}/static/streams/{stream_id}/index.m3u8"
+
     return jsonify({
         "status": "success",
-        "hls_link": f"{request.host_url}static/streams/{stream_id}/index.m3u8"
+        "hls_link": hls_url
     })
+
 
 
 # ---------------------------
@@ -95,8 +101,12 @@ def convert():
 @app.route("/static/streams/<path:filename>")
 def serve_hls(filename):
     response = send_from_directory(HLS_DIR, filename)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Cache-Control"] = "no-cache"
+    response.headers.update({
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/vnd.apple.mpegurl"
+    })
     return response
 
 
