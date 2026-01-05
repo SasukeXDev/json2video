@@ -38,6 +38,8 @@ def convert():
 
     # Full URL for the frontend
     base_server_url = request.host_url.rstrip('/')
+    if base_server_url.startswith('http://') and '.onrender.com' in base_server_url:
+        base_server_url = base_server_url.replace('http://', 'https://')
 
     if not os.path.exists(playlist_file):
         os.makedirs(output_path, exist_ok=True)
