@@ -55,9 +55,14 @@ def convert():
         "-c:a", "aac",
         "-ac", "2",
 
+        "-metadata:s:a:0", "language=eng",
+        "-metadata:s:a:1", "language=hin",
+
         "-f", "hls",
         "-hls_time", "6",
-        "-hls_list_size", "0",
+        # change the et
+        "-hls_playlist_type", "event",
+
         "-hls_flags", "independent_segments",
 
         "-hls_segment_filename",
