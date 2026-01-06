@@ -28,7 +28,6 @@ def convert():
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # Return existing if found
     if os.path.exists(playlist):
         proto = request.headers.get("X-Forwarded-Proto", "https")
         return jsonify({
@@ -36,32 +35,34 @@ def convert():
             "hls_link": f"{proto}://{request.host}/static/streams/{stream_id}/index.m3u8"
         })
 
-    # -------- STRENGTHENED FFMPEG COMMAND --------
+    # -------- ULTIMATE CLEAN FFMPEG COMMAND --------
     cmd = [
         "ffmpeg", "-y",
         "-hide_banner", "-loglevel", "error",
         
-        # FIX: Increase probing to find all audio tracks in large MKV files
-        "-analyzeduration", "20000000", 
-        "-probesize", "20000000",
-        
+        # 1. Connection settings
         "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+        
+        # 2. Input
         "-i", video_url,
 
-        # FIX: Explicit Mapping (Maps 1st video and ALL audio streams ONLY)
-        # This ignores the corrupted PNG attachment causing your crash
-        "-map", "0:v:0",
-        "-map", "0:a",
-
-        "-c:v", "copy",        # Direct stream copy for video
-        "-c:a", "aac",         # Encode all audio to AAC for HLS
-        "-ac", "2",            # Downmix to stereo for web stability
+        # 3. Stream Selection (The Fix)
+        "-map", "0:v:0",           # Take ONLY the first video stream
+        "-map", "0:a",             # Take ALL audio streams
+        "-sn",                     # EXPLICITLY DISABLE SUBTITLES
+        "-dn",                     # EXPLICITLY DISABLE DATA/ATTACHMENTS (Fixes PNG error)
+        "-ignore_unknown",         # Skip anything FFmpeg doesn't recognize
         
-        # FIX: HLS VOD Flags (Removes Live Badge)
+        # 4. Encoding
+        "-c:v", "copy",            # No re-encoding video (Fast)
+        "-c:a", "aac",             # Standard audio for HLS
+        "-ac", "2",                # Stereo downmix for stability
+        
+        # 5. HLS Settings (Fixes Live Badge)
         "-f", "hls",
         "-hls_time", "10",
         "-hls_list_size", "0",
-        "-hls_playlist_type", "vod",  # Forces VOD (removes Live badge)
+        "-hls_playlist_type", "vod", # Removes LIVE badge, adds timeline
         "-hls_flags", "independent_segments",
         
         "-hls_segment_filename", os.path.join(out_dir, "seg_%05d.ts"),
@@ -69,31 +70,31 @@ def convert():
     ]
 
     try:
-        # Start conversion in background
+        # Run in background
         subprocess.Popen(cmd)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-    # -------- WAIT UNTIL PLAYLIST IS READY --------
-    timeout = 20 # Increased timeout for slow probing links
-    while timeout > 0:
+    # -------- WAIT UNTIL PLAYLIST FILE EXISTS --------
+    # Check for the file periodically before responding
+    ready = False
+    for _ in range(15): # Wait up to 15 seconds
         if os.path.exists(playlist) and os.path.getsize(playlist) > 0:
+            ready = True
             break
         time.sleep(1)
-        timeout -= 1
 
-    if not os.path.exists(playlist):
-        return jsonify({"status": "error", "message": "FFmpeg failed to create playlist"}), 500
-
-    proto = request.headers.get("X-Forwarded-Proto", "https")
-    hls_url = f"{proto}://{request.host}/static/streams/{stream_id}/index.m3u8"
-
-    return jsonify({"status": "success", "hls_link": hls_url})
+    if ready:
+        proto = request.headers.get("X-Forwarded-Proto", "https")
+        hls_url = f"{proto}://{request.host}/static/streams/{stream_id}/index.m3u8"
+        return jsonify({"status": "success", "hls_link": hls_url})
+    else:
+        # If it still fails, it's likely a network/source issue
+        return jsonify({"status": "error", "message": "FFmpeg failed to generate stream. Check source link."}), 500
 
 @app.route("/static/streams/<path:filename>")
 def serve_hls(filename):
     response = send_from_directory(HLS_DIR, filename)
-    # Vital for multi-track support
     if filename.endswith(".m3u8"):
         response.headers["Content-Type"] = "application/vnd.apple.mpegurl"
     response.headers["Access-Control-Allow-Origin"] = "*"
