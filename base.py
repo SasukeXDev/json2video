@@ -1,4 +1,4 @@
-import os, subprocess, hashlib, time, json
+import os, subprocess, hashlib, time
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
@@ -6,23 +6,8 @@ app = Flask(__name__)
 CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HLS_ROOT = os.path.join(BASE_DIR, "static", "streams")
-os.makedirs(HLS_ROOT, exist_ok=True)
-
-
-def ffprobe_stream_id(url: str) -> str:
-    """
-    Generate a stable stream-id based on actual media info
-    """
-    probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_format", "-of", "json", url],
-        capture_output=True,
-        text=True
-    )
-
-    raw = probe.stdout or url
-    return hashlib.md5(raw.encode()).hexdigest()
-
+HLS_DIR = os.path.join(BASE_DIR, "static", "streams")
+os.makedirs(HLS_DIR, exist_ok=True)
 
 @app.route("/convert", methods=["POST"])
 def convert():
@@ -32,13 +17,13 @@ def convert():
     if not video_url:
         return jsonify({"error": "No URL provided"}), 400
 
-    stream_id = ffprobe_stream_id(video_url)
-    out_dir = os.path.join(HLS_ROOT, stream_id)
+    stream_id = hashlib.md5(video_url.encode()).hexdigest()
+    out_dir = os.path.join(HLS_DIR, stream_id)
     playlist = os.path.join(out_dir, "index.m3u8")
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # If conversion not started yet
+    # Start conversion if not already started
     if not os.path.exists(playlist):
         cmd = [
             "ffmpeg", "-y",
@@ -47,26 +32,18 @@ def convert():
             "-reconnect_delay_max", "5",
             "-i", video_url,
 
-            # MAP ALL VIDEO + AUDIO
             "-map", "0:v:0",
             "-map", "0:a?",
-
-            # Video
             "-c:v", "copy",
-
-            # Audio (browser safe)
             "-c:a", "aac",
             "-ac", "2",
 
-            # HLS output
             "-f", "hls",
             "-hls_time", "6",
             "-hls_list_size", "0",
             "-hls_playlist_type", "vod",
             "-hls_flags", "independent_segments",
-            "-hls_segment_filename",
-            os.path.join(out_dir, "seg_%05d.ts"),
-
+            "-hls_segment_filename", os.path.join(out_dir, "seg_%05d.ts"),
             playlist
         ]
 
@@ -76,26 +53,23 @@ def convert():
             stderr=subprocess.DEVNULL
         )
 
-        # WAIT until playlist exists (important)
-        for _ in range(20):
-            if os.path.exists(playlist):
-                break
-            time.sleep(0.5)
+        # ⏳ WAIT until index.m3u8 exists (max 15s)
+        timeout = time.time() + 15
+        while not os.path.exists(playlist):
+            if time.time() > timeout:
+                return jsonify({"error": "HLS generation timeout"}), 500
+            time.sleep(0.3)
 
     proto = request.headers.get("X-Forwarded-Proto", "https")
     hls_url = f"{proto}://{request.host}/streams/{stream_id}/index.m3u8"
 
-    return jsonify({
-        "status": "ok",
-        "stream_id": stream_id,
-        "hls": hls_url
-    })
+    return jsonify({"hls": hls_url})
 
 
-# ✅ CORRECT STATIC ROUTE
+# ✅ CORRECT STATIC ROUTE (IMPORTANT)
 @app.route("/streams/<stream_id>/<path:filename>")
 def serve_hls(stream_id, filename):
-    directory = os.path.join(HLS_ROOT, stream_id)
+    directory = os.path.join(HLS_DIR, stream_id)
     response = send_from_directory(directory, filename)
     response.headers["Access-Control-Allow-Origin"] = "*"
 
@@ -108,4 +82,4 @@ def serve_hls(stream_id, filename):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=10000)
