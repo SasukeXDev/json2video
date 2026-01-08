@@ -110,10 +110,18 @@ def convert():
             )
 
         # wait a bit
-        for _ in range(6):
-            if os.path.exists(master):
+        video_playlist = os.path.join(out_dir, "video.m3u8")
+
+        for _ in range(20):
+            if os.path.exists(video_playlist):
                 break
             time.sleep(1)
+
+
+
+
+    if not os.path.exists(video_playlist):
+        return jsonify({"error": "HLS not ready"}), 500
 
     return jsonify({
         "status": "success",
@@ -121,17 +129,20 @@ def convert():
     })
 
 
-@app.route("/static/streams/<path:path>")
-def serve(path):
-    resp = send_from_directory(HLS_DIR, path)
-    resp.headers["Access-Control-Allow-Origin"] = "*"
 
-    if path.endswith(".m3u8"):
-        resp.headers["Content-Type"] = "application/vnd.apple.mpegurl"
-    elif path.endswith(".ts"):
-        resp.headers["Content-Type"] = "video/mp2t"
+@app.route("/static/streams/<stream_id>/<path:filename>")
+def serve_hls(stream_id, filename):
+    directory = os.path.join(HLS_DIR, stream_id)
+    response = send_from_directory(directory, filename)
 
-    return resp
+    response.headers["Access-Control-Allow-Origin"] = "*"
+
+    if filename.endswith(".m3u8"):
+        response.headers["Content-Type"] = "application/vnd.apple.mpegurl"
+    elif filename.endswith(".ts"):
+        response.headers["Content-Type"] = "video/mp2t"
+
+    return response
 
 
 if __name__ == "__main__":
