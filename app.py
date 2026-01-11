@@ -1,6 +1,5 @@
 from flask import Flask, request, send_file, jsonify
 import yt_dlp
-import ffmpeg
 import os
 import uuid
 
@@ -9,9 +8,14 @@ app = Flask(__name__)
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+@app.route("/")
+def home():
+    return {"status": "API running"}
+
 @app.route("/download", methods=["POST"])
 def download_video():
-    data = request.json
+    data = request.get_json()
+
     if not data or "url" not in data:
         return jsonify({"error": "Video URL required"}), 400
 
@@ -22,6 +26,7 @@ def download_video():
     ydl_opts = {
         "outtmpl": filepath,
         "format": "mp4",
+        "noplaylist": True,
         "quiet": True
     }
 
