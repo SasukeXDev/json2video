@@ -1,9 +1,11 @@
 requests
 Flask
-Gunicorn
 fake_useragent
 flask-cors
 python-dotenv
 requests[socks]
 werkzeug
 flask-logging
+
+yt-dlp
+gunicorn
