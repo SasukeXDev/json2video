@@ -1,4 +1,4 @@
-import os, tempfile, json, requests
+import os, tempfile, json, requests, re
 from flask import Flask, request, jsonify, send_file
 
 # Compatible with MoviePy 1.x and 2.x
