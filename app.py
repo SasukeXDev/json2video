@@ -19,20 +19,24 @@ WIDTH, HEIGHT = 1080, 1920   # 9:16 reels
 
 # ---------- MUSIC ----------
 def download_music(query):
-    out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": out,
-        "quiet": True,
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }]
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([f"ytsearch1:{query}"])
-    return out
+    url = f"https://ncs.io/search?q={query.replace(' ', '%20')}"
+    html = requests.get(url).text
+    links = re.findall(r'href="(/music/[^"]+)"', html)
+
+    if not links:
+        return None
+
+    track_page = "https://ncs.io" + links[0]
+    page = requests.get(track_page).text
+    mp3 = re.search(r'href="(https://[^"]+\.mp3)"', page)
+
+    if not mp3:
+        return None
+
+    path = tempfile.mktemp(suffix=".mp3")
+    open(path, "wb").write(requests.get(mp3.group(1)).content)
+    return path
+
 
 # ---------- IMAGE ----------
 def download_image(query):
