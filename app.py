@@ -8,10 +8,13 @@ from io import BytesIO
 from PIL import Image
 from gtts import gTTS
 
-# MoviePy imports
-from moviepy.editor import ImageSequenceClip, concatenate_videoclips, CompositeVideoClip
+# MoviePy imports compatible with 2.x
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+from moviepy.video.compositing.concatenate import concatenate_videoclips
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.audio.AudioClip import CompositeAudioClip
+
 
 app = Flask(__name__)
 
