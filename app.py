@@ -1,72 +1,79 @@
-from flask import Flask, request, send_file, jsonify
-from moviepy import *
+import os, tempfile, json, requests
+from flask import Flask, request, jsonify, send_file
+from moviepy.editor import *
+from PIL import Image
 from gtts import gTTS
-import tempfile, os, requests, random
+import yt_dlp
 
 app = Flask(__name__)
 
-def download_image(query):
-    url = f"https://source.unsplash.com/1280x720/?{query}"
-    img = requests.get(url, timeout=15).content
-    path = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
-    open(path, "wb").write(img)
-    return path
+WIDTH, HEIGHT = 1080, 1920   # 9:16 reels
 
-def make_tts(text):
+# ---------- MUSIC ----------
+def download_music(query):
+    out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out,
+        "quiet": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }]
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([f"ytsearch1:{query}"])
+    return out
+
+# ---------- IMAGE ----------
+def download_image(query):
+    url = f"https://source.unsplash.com/1080x1920/?{query}"
+    img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
+    with open(img, "wb") as f:
+        f.write(requests.get(url).content)
+    return img
+
+# ---------- TTS ----------
+def make_voice(text):
     path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
     gTTS(text=text, lang="en").save(path)
     return path
 
-def create_video(data, out_path):
-    clips = []
-    subtitles = []
+# ---------- API ----------
+@app.route("/json2video", methods=["POST"])
+def json2video():
+    data = request.json
+    clips, audios = [], []
 
-    w, h = data.get("width",1280), data.get("height",720)
-    fps = data.get("fps",30)
-    bg_music = data.get("music")
+    for scene in data["scenes"]:
+        img = download_image(scene["image"])
+        voice = make_voice(scene["text"])
+        audios.append(AudioFileClip(voice))
 
-    for i, sc in enumerate(data["scenes"]):
-        img_path = download_image(sc.get("image_query","nature"))
-        dur = sc.get("duration",4)
-        txt = sc.get("text","")
-        anim = sc.get("animation","fade")
-        voice = sc.get("voice",True)
+        img_clip = (ImageClip(img)
+                    .resize((WIDTH, HEIGHT))
+                    .set_duration(AudioFileClip(voice).duration)
+                    .fadein(0.5).fadeout(0.5))
+        txt = (TextClip(scene["text"], fontsize=60, color="white", method="caption",
+                        size=(900, None))
+               .set_position(("center", "bottom"))
+               .set_duration(img_clip.duration))
 
-        base = ImageClip(img_path).resize((w,h)).set_duration(dur)
-
-        if anim=="fade":
-            base = base.crossfadein(0.5).crossfadeout(0.5)
-        if anim=="slide":
-            base = base.set_position(lambda t:(int(-w + t*w/dur),0))
-
-        layers = [base]
-
-        if txt:
-            sub = TextClip(txt, fontsize=50, color="white", size=(w-100,None), method="caption")\
-                  .set_position("center").set_duration(dur)
-            layers.append(sub)
-            subtitles.append((i*dur, txt))
-
-        if voice:
-            v = make_tts(txt)
-            layers[0] = layers[0].set_audio(AudioFileClip(v))
-
-        clips.append(CompositeVideoClip(layers))
+        clips.append(CompositeVideoClip([img_clip, txt]))
 
     video = concatenate_videoclips(clips)
 
-    if bg_music:
-        music = AudioFileClip(bg_music).volumex(0.2).set_duration(video.duration)
-        video = video.set_audio(CompositeAudioClip([video.audio, music]))
+    if "music" in data:
+        bg = download_music(data["music"])
+        music = AudioFileClip(bg).volumex(0.25).set_duration(video.duration)
+        final_audio = CompositeAudioClip([video.audio, music])
+        video = video.set_audio(final_audio)
 
-    video.write_videofile(out_path, fps=fps, codec="libx264")
+    out = "final.mp4"
+    video.write_videofile(out, fps=24, codec="libx264", audio_codec="aac")
 
-@app.route("/json2video", methods=["POST"])
-def json2video():
-    data = request.get_json()
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-    create_video(data, tmp)
-    return send_file(tmp, as_attachment=True, download_name="video.mp4")
+    return send_file(out, mimetype="video/mp4")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
