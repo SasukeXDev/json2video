@@ -39,12 +39,27 @@ def download_music(query):
 
 
 # ---------- IMAGE ----------
-def download_image(query):
-    url = f"https://source.unsplash.com/1080x1920/?{query}"
-    img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
-    with open(img, "wb") as f:
-        f.write(requests.get(url).content)
-    return img
+def download_image(query, path):
+    try:
+        url = f"https://source.unsplash.com/1080x1920/?{query}"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+
+        # Check content-type
+        if "image" not in resp.headers.get("Content-Type", ""):
+            raise ValueError("Downloaded file is not an image")
+
+        with open(path, "wb") as f:
+            f.write(resp.content)
+        return True
+    except Exception as e:
+        print("Image download failed:", e)
+        # fallback to plain color image
+        from PIL import Image
+        img = Image.new("RGB", (1080, 1920), color=(30, 30, 30))
+        img.save(path)
+        return False
+
 
 # ---------- TTS ----------
 def make_voice(text):
