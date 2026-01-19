@@ -1,81 +1,83 @@
-import os
-import tempfile
-from flask import Flask, request, send_file
-from PIL import Image
-from gtts import gTTS
-from io import BytesIO
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+import moviepy.editor as mp
 import requests
+import os
 
-from moviepy.editor import ImageSequenceClip, AudioFileClip, CompositeAudioClip, concatenate_videoclips
+app = FastAPI()
 
-app = Flask(__name__)
+# ------------------------
+# Pydantic model for meme
+# ------------------------
+class MemeJSON(BaseModel):
+    top_text: str
+    bottom_text: str
+    duration: float = 5
+    width: int = 1080
+    height: int = 1920
+    background_image: Optional[str] = None  # URL of image
+    audio_url: Optional[str] = None
 
-WIDTH, HEIGHT = 1080, 1920
-FPS = 24
+# ------------------------
+# Utility to download files
+# ------------------------
+def download_file(url, filename):
+    r = requests.get(url, stream=True)
+    if r.status_code == 200:
+        with open(filename, "wb") as f:
+            for chunk in r.iter_content(1024):
+                f.write(chunk)
+        return filename
+    else:
+        raise HTTPException(status_code=400, detail=f"Failed to download {url}")
 
+# ------------------------
+# Render meme video
+# ------------------------
+def render_meme(data: MemeJSON):
+    width, height = data.width, data.height
 
-# ---------- IMAGE ----------
-def download_image(query, path):
-    """Download image or fallback to black"""
+    # Background clip
+    if data.background_image:
+        bg_path = "bg_image.png"
+        download_file(data.background_image, bg_path)
+        bg_clip = mp.ImageClip(bg_path).set_duration(data.duration)
+        os.remove(bg_path)
+    else:
+        # solid black background
+        bg_clip = mp.ColorClip(size=(width, height), color=(0,0,0), duration=data.duration)
+
+    # Add top text
+    top_clip = mp.TextClip(data.top_text, fontsize=80, color='white', size=(width-100, None), method='caption')
+    top_clip = top_clip.set_position(("center", 50)).set_duration(data.duration)
+
+    # Add bottom text
+    bottom_clip = mp.TextClip(data.bottom_text, fontsize=80, color='white', size=(width-100, None), method='caption')
+    bottom_clip = bottom_clip.set_position(("center", height-150)).set_duration(data.duration)
+
+    # Overlay text on background
+    final = mp.CompositeVideoClip([bg_clip, top_clip, bottom_clip])
+
+    # Add audio if exists
+    if data.audio_url:
+        audio_file = "audio.mp3"
+        download_file(data.audio_url, audio_file)
+        audio_clip = mp.AudioFileClip(audio_file).subclip(0, data.duration)
+        final = final.set_audio(audio_clip)
+        os.remove(audio_file)
+
+    output_file = "meme_reel.mp4"
+    final.write_videofile(output_file, fps=30)
+    return output_file
+
+# ------------------------
+# API endpoint
+# ------------------------
+@app.post("/generate_meme")
+async def generate_meme(json_data: MemeJSON):
     try:
-        url = f"https://via.placeholder.com/1080x1920.png?text={query.replace(' ', '+')}"
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        img = Image.open(BytesIO(resp.content)).convert("RGB")
-        img.save(path)
-    except:
-        img = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
-        img.save(path)
-
-
-# ---------- TTS ----------
-def make_tts(text, path):
-    gTTS(text=text, lang="en").save(path)
-
-
-# ---------- API ----------
-@app.route("/json2video", methods=["POST"])
-def json2video():
-    data = request.json
-    temp_dir = tempfile.mkdtemp()
-
-    clips = []
-    audio_tracks = []
-    total_duration = 0
-
-    scenes = data.get("scenes", [])
-    if not scenes:
-        return {"error": "No scenes provided"}, 400
-
-    for i, scene in enumerate(scenes):
-        text = scene.get("text", f"Scene {i+1}")
-        duration = scene.get("duration", 3)
-        image_query = scene.get("image", f"Scene{i+1}")
-
-        # Image
-        img_path = os.path.join(temp_dir, f"img_{i}.jpg")
-        download_image(image_query, img_path)
-        clip = ImageSequenceClip([img_path], durations=[duration])
-        clips.append(clip)
-
-        # TTS
-        tts_path = os.path.join(temp_dir, f"tts_{i}.mp3")
-        make_tts(text, tts_path)
-        audio = AudioFileClip(tts_path).set_start(total_duration)
-        audio_tracks.append(audio)
-
-        total_duration += duration
-
-    video = concatenate_videoclips(clips, method="compose")
-    if audio_tracks:
-        final_audio = CompositeAudioClip(audio_tracks)
-        video = video.set_audio(final_audio)
-
-    out_path = os.path.join(temp_dir, "output.mp4")
-    video.write_videofile(out_path, fps=FPS, codec="libx264", audio_codec="aac")
-
-    return send_file(out_path, as_attachment=True)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+        video_path = render_meme(json_data)
+        return {"message": "Meme video generated!", "video_path": video_path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
