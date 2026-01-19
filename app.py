@@ -1,5 +1,5 @@
 from flask import Flask, request, send_file, jsonify
-from moviepy.editor import *
+from moviepy import *
 from gtts import gTTS
 import tempfile, os, requests, random
 
