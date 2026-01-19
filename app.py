@@ -7,14 +7,13 @@ from flask import Flask, request, send_file
 from io import BytesIO
 from PIL import Image
 from gtts import gTTS
+import yt_dlp
 
-# MoviePy imports compatible with 2.x
+# MoviePy imports compatible with latest stable
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-from moviepy.video.compositing.concatenate import concatenate_videoclips
-from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.editor import concatenate_videoclips, CompositeVideoClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.audio.AudioClip import CompositeAudioClip
-
 
 app = Flask(__name__)
 
@@ -23,6 +22,7 @@ FPS = 24
 
 # ---------- MUSIC (NCS) ----------
 def download_music(query):
+    """Download music from NCS website; fallback None"""
     try:
         url = f"https://ncs.io/search?q={query.replace(' ', '%20')}"
         html = requests.get(url, timeout=10).text
@@ -45,22 +45,15 @@ def download_music(query):
         print("[WARN] NCS music download failed:", e)
         return None
 
-
 # ---------- IMAGE ----------
 def download_image(query, path):
-    """
-    Downloads an image for the query from placeholder service.
-    Fallback to black image if fails.
-    """
+    """Download an image from placeholder.com or fallback to black"""
     try:
-        # Use placeholder.com instead of Unsplash (always works)
-        # 1080x1920 resolution
         url = f"https://via.placeholder.com/1080x1920.png?text={query.replace(' ','+')}"
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
 
-        img = Image.open(BytesIO(resp.content))
-        img = img.convert("RGB")
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
         img.save(path)
         return True
     except Exception as e:
@@ -70,11 +63,10 @@ def download_image(query, path):
         img.save(path)
         return False
 
-
 # ---------- TTS ----------
 def make_voice(text, path):
+    """Create TTS voice mp3"""
     gTTS(text=text, lang="en").save(path)
-
 
 # ---------- API ----------
 @app.route("/json2video", methods=["POST"])
@@ -135,4 +127,5 @@ def json2video():
 
 
 if __name__ == "__main__":
+    # Production-ready: use host 0.0.0.0
     app.run(host="0.0.0.0", port=8000)
