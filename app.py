@@ -1,12 +1,17 @@
 import os, tempfile, json, requests
 from flask import Flask, request, jsonify, send_file
-from moviepy import (
-    ImageClip, TextClip, CompositeVideoClip,
-    concatenate_videoclips, AudioFileClip, CompositeAudioClip
-)
+
+# Compatible with MoviePy 1.x and 2.x
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+from moviepy.video.VideoClip import TextClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.audio.AudioClip import CompositeAudioClip
+
 from PIL import Image
 from gtts import gTTS
 import yt_dlp
+
 
 app = Flask(__name__)
 
