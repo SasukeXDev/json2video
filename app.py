@@ -39,26 +39,43 @@ def download_music(query):
 
 
 # ---------- IMAGE ----------
+import requests
+from PIL import Image
+from io import BytesIO
+import os
+
 def download_image(query, path):
+    """
+    Downloads an image for the query. If it fails, creates a fallback blank image.
+    """
     try:
+        # Use unsplash or other placeholder service
         url = f"https://source.unsplash.com/1080x1920/?{query}"
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
 
-        # Check content-type
+        # Verify content type
         if "image" not in resp.headers.get("Content-Type", ""):
-            raise ValueError("Downloaded file is not an image")
+            raise ValueError(f"Downloaded content is not an image. Content-Type: {resp.headers.get('Content-Type')}")
 
-        with open(path, "wb") as f:
-            f.write(resp.content)
+        img = Image.open(BytesIO(resp.content))
+        img = img.convert("RGB")
+        img.save(path)
         return True
+
     except Exception as e:
-        print("Image download failed:", e)
-        # fallback to plain color image
-        from PIL import Image
-        img = Image.new("RGB", (1080, 1920), color=(30, 30, 30))
+        print(f"[WARN] Failed to download image '{query}': {e}")
+        # fallback: plain black image
+        img = Image.new("RGB", (1080, 1920), (0, 0, 0))
         img.save(path)
         return False
+
+# Usage
+temp_dir = "/tmp/test_images"
+os.makedirs(temp_dir, exist_ok=True)
+img_path = os.path.join(temp_dir, "img_0.jpg")
+download_image("nature", img_path)
+
 
 
 # ---------- TTS ----------
