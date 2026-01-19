@@ -1,6 +1,7 @@
-Flask==2.3.6
-moviepy==2.0.3
-Pillow==10.1.0
-gTTS==2.3.0
-requests==2.32.0
-yt-dlp==2026.01.19
+flask
+moviepy
+gtts
+pillow
+requests
+yt-dlp
+imageio[ffmpeg]
